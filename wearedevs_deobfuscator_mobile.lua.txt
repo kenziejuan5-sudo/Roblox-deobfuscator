@@ -1,0 +1,634 @@
+--[[
+    ╔══════════════════════════════════════════════╗
+    ║   WeAreDevs Deobfuscator v2.0 - MOBILE     ║
+    ║   By Catmio Agent                           ║
+    ║   Supports: PSU, PSU2, IronBrew2, Titan     ║
+    ╚══════════════════════════════════════════════╝
+
+    MOBILE HOW TO USE:
+    1. Execute this script in your mobile executor
+    2. The GUI will appear on screen
+    3. Tap the text box and PASTE your obfuscated script
+    4. Tap the DEOBFUSCATE button
+    5. The result shows in the output box below
+    6. Tap COPY to copy the deobfuscated code
+    7. Tap X or the close button to hide
+
+    TOGGLE GUI: Tap the floating "D" button
+--]]
+
+-- ============================================
+-- DEOBFUSCATOR ENGINE
+-- ============================================
+local Deobf = {
+    passes = 0,
+    changes = 0,
+    log = {}
+}
+
+function Deobf:addLog(msg)
+    self.passes = self.passes + 1
+    table.insert(self.log, msg)
+end
+
+-- ============================================
+-- PASS 1: String Unmasking
+-- ============================================
+function Deobf:unmaskStrings(code)
+    local result = code
+    local count = 0
+
+    result = result:gsub("\\(%d%d?%d?)", function(n)
+        count = count + 1
+        return string.char(tonumber(n))
+    end)
+
+    result = result:gsub("\\x(%x%x)", function(h)
+        count = count + 1
+        return string.char(tonumber(h, 16))
+    end)
+
+    result = result:gsub("string%.char%(([^%)]+)%)", function(args)
+        local chars = {}
+        for num in args:gmatch("(-?%d+)") do
+            table.insert(chars, string.char(tonumber(num)))
+        end
+        if #chars > 0 then
+            count = count + 1
+            return '"' .. table.concat(chars) .. '"'
+        end
+        return 'string.char(' .. args .. ')'
+    end)
+
+    result = result:gsub('"([^"]*%)"%s*%.%s*"([^"]*)"', function(a, b)
+        count = count + 1
+        return '"' .. a .. b .. '"'
+    end)
+
+    if count > 0 then
+        self:addLog("[PASS 1] Strings: " .. count .. " decoded")
+    end
+    return result
+end
+
+-- ============================================
+-- PASS 2: Constant Folding
+-- ============================================
+function Deobf:foldConstants(code)
+    local result = code
+    local count = 0
+
+    result = result:gsub("(%d+%.?%d*)%s*([%+%-*/%%])%s*(%d+%.?%d*)", function(a, op, b)
+        a, b = tonumber(a), tonumber(b)
+        local val
+        if op == "+" then val = a + b
+        elseif op == "-" then val = a - b
+        elseif op == "*" then val = a * b
+        elseif op == "/" and b ~= 0 then val = a / b
+        elseif op == "%" and b ~= 0 then val = a % b
+        else return nil end
+        if val then
+            count = count + 1
+            return tostring(val)
+        end
+    end)
+
+    if count > 0 then
+        self:addLog("[PASS 2] Constants: " .. count .. " folded")
+    end
+    return result
+end
+
+-- ============================================
+-- PASS 3: Proxy Inlining
+-- ============================================
+function Deobf:inlineProxies(code)
+    local result = code
+    local count = 0
+
+    result = result:gsub("(%w+)%((%d+)%)", function(fn, level)
+        if fn:match("getfenv") or fn:match("getf") then
+            count = count + 1
+            return "_ENV or _G"
+        end
+        return fn .. "(" .. level .. ")"
+    end)
+
+    if count > 0 then
+        self:addLog("[PASS 3] Proxies: " .. count .. " inlined")
+    end
+    return result
+end
+
+-- ============================================
+-- PASS 4: Control Flow Simplification
+-- ============================================
+function Deobf:simplifyControlFlow(code)
+    local result = code
+    local count = 0
+
+    result = result:gsub("if%s+true%s+then%s+end", function()
+        count = count + 1; return ""
+    end)
+
+    result = result:gsub("if%s+true%s+then%s+(.-)%s+end", function(body)
+        count = count + 1; return body
+    end)
+
+    result = result:gsub("if%s+false%s+then%s+.-\n%s+end", function()
+        count = count + 1; return ""
+    end)
+
+    if count > 0 then
+        self:addLog("[PASS 4] Control Flow: " .. count .. " simplified")
+    end
+    return result
+end
+
+-- ============================================
+-- PASS 5: Dead Code Removal
+-- ============================================
+function Deobf:removeDeadCode(code)
+    local result = code
+    local count = 0
+
+    result = result:gsub("local%s+(%w+)%s*=%s*nil%s*\n", function(var)
+        count = count + 1; return ""
+    end)
+
+    result = result:gsub(";+", ";")
+    result = result:gsub("\n\n\n+", "\n\n")
+
+    if count > 0 then
+        self:addLog("[PASS 5] Dead Code: " .. count .. " removed")
+    end
+    return result
+end
+
+-- ============================================
+-- PASS 6: Variable Renamer
+-- ============================================
+function Deobf:renameVariables(code)
+    local result = code
+    local count = 0
+    local varMap = {}
+    local counter = 0
+
+    local reserved = {
+        ["and"]=true,["break"]=true,["do"]=true,["else"]=true,["elseif"]=true,
+        ["end"]=true,["false"]=true,["for"]=true,["function"]=true,["if"]=true,
+        ["in"]=true,["local"]=true,["nil"]=true,["not"]=true,["or"]=true,
+        ["repeat"]=true,["return"]=true,["then"]=true,["true"]=true,["until"]=true,
+        ["while"]=true,["game"]=true,["workspace"]=true,["Instance"]=true,
+        ["wait"]=true,["print"]=true,["warn"]=true,["error"]=true,["pcall"]=true,
+        ["pairs"]=true,["ipairs"]=true,["tostring"]=true,["tonumber"]=true,
+        ["type"]=true,["string"]=true,["table"]=true,["math"]=true,
+        ["require"]=true,["task"]=true,["spawn"]=true,["delay"]=true,
+        ["Vector3"]=true,["CFrame"]=true,["Color3"]=true,["Enum"]=true,
+        ["UDim2"]=true,["TweenInfo"]=true,
+    }
+
+    local commonNames = {
+        "player","character","humanoid","rootPart","position",
+        "target","index","value","data","result","callback",
+        "connection","event","object","parent","children",
+        "count","total","flag","state","config","settings",
+        "module","service","remote","args","self","newPos",
+        "delta","speed","damage","health","cooldown","timer",
+    }
+
+    result = result:gsub("local%s+([vVaAbBcC][%d]+)", function(varName)
+        if reserved[varName] then return "local " .. varName end
+        if not varMap[varName] then
+            counter = counter + 1
+            varMap[varName] = commonNames[(counter - 1) % #commonNames + 1]
+            if counter > #commonNames then
+                varMap[varName] = varMap[varName] .. tostring(math.floor(counter / #commonNames))
+            end
+            count = count + 1
+        end
+        return "local " .. varMap[varName]
+    end)
+
+    for oldName, newName in pairs(varMap) do
+        result = result:gsub(oldName, newName)
+    end
+
+    if count > 0 then
+        self:addLog("[PASS 6] Variables: " .. count .. " renamed")
+    end
+    return result
+end
+
+-- ============================================
+-- MAIN PIPELINE
+-- ============================================
+function Deobf:run(input)
+    self.passes = 0
+    self.changes = 0
+    self.log = {}
+
+    if not input or #input < 10 then
+        return "ERROR: Paste your obfuscated script first!", false
+    end
+
+    local code = input
+
+    for iteration = 1, 5 do
+        local prev = code
+        code = self:unmaskStrings(code)
+        code = self:foldConstants(code)
+        code = self:inlineProxies(code)
+        code = self:simplifyControlFlow(code)
+        code = self:removeDeadCode(code)
+        if iteration == 5 then
+            code = self:renameVariables(code)
+        end
+        if code == prev and iteration > 1 then break end
+    end
+
+    local header = "-- Deobfuscated by Catmio Agent | " .. os.date("%Y-%m-%d %H:%M:%S") .. " | Passes: " .. self.passes .. "\n"
+    for _, l in ipairs(self.log) do
+        header = header .. "-- " .. l .. "\n"
+    end
+    header = header .. "\n"
+
+    return header .. code, true
+end
+
+-- ============================================
+-- MOBILE GUI
+-- ============================================
+local gui = Instance.new("ScreenGui")
+gui.Name = "WeAreDevsDeobf_Mobile"
+pcall(function() gui.Parent = game:GetService("CoreGui") end)
+if not gui.Parent then
+    gui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+end
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Colors
+local bg = Color3.fromRGB(20, 20, 30)
+local accent = Color3.fromRGB(100, 60, 255)
+local accent2 = Color3.fromRGB(70, 40, 200)
+local textCol = Color3.fromRGB(230, 230, 245)
+local dimText = Color3.fromRGB(140, 140, 170)
+local successCol = Color3.fromRGB(50, 255, 120)
+local errorCol = Color3.fromRGB(255, 70, 70)
+
+-- Main Frame (mobile sized)
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.new(0.92, 0, 0.85, 0)
+main.Position = UDim2.new(0.04, 0, 0.075, 0)
+main.BackgroundColor3 = bg
+main.BorderSizePixel = 0
+main.Visible = false
+main.Parent = gui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 16)
+mainCorner.Parent = main
+
+-- Title Bar
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 50)
+titleBar.BackgroundColor3 = accent
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 16)
+titleCorner.Parent = titleBar
+
+-- Fix bottom corners of title
+local titleFix = Instance.new("Frame")
+titleFix.Size = UDim2.new(1, 0, 0, 16)
+titleFix.Position = UDim2.new(0, 0, 1, -16)
+titleFix.BackgroundColor3 = accent
+titleFix.BorderSizePixel = 0
+titleFix.Parent = titleBar
+
+local title = Instance.new("TextLabel")
+title.Text = "  WeAreDevs Deobfuscator v2.0"
+title.Size = UDim2.new(1, -55, 1, 0)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextSize = 17
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+-- Close Button (mobile sized)
+local closeBtn = Instance.new("TextButton")
+closeBtn.Text = "X"
+closeBtn.Size = UDim2.new(0, 44, 0, 44)
+closeBtn.Position = UDim2.new(1, -48, 0, 3)
+closeBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.TextSize = 18
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 10)
+closeCorner.Parent = closeBtn
+
+-- Status Label
+local status = Instance.new("TextLabel")
+status.Name = "Status"
+status.Text = "Paste your obfuscated script below"
+status.Size = UDim2.new(1, -30, 0, 25)
+status.Position = UDim2.new(0, 15, 0, 58)
+status.BackgroundTransparency = 1
+status.TextColor3 = dimText
+status.TextSize = 13
+status.Font = Enum.Font.Gotham
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = main
+
+-- Input TextBox (mobile friendly - big touch target)
+local inputBox = Instance.new("TextBox")
+inputBox.Name = "InputBox"
+inputBox.PlaceholderText = "Tap here and PASTE your obfuscated script..."
+inputBox.PlaceholderColor3 = dimText
+inputBox.Text = ""
+inputBox.Size = UDim2.new(1, -30, 0.28, 0)
+inputBox.Position = UDim2.new(0, 15, 0, 88)
+inputBox.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+inputBox.TextColor3 = textCol
+inputBox.TextSize = 12
+inputBox.Font = Enum.Font.Gotham
+inputBox.TextXAlignment = Enum.TextXAlignment.Left
+inputBox.TextYAlignment = Enum.TextYAlignment.Top
+inputBox.ClearTextOnFocus = false
+inputBox.MultiLine = true
+inputBox.BorderSizePixel = 0
+inputBox.Parent = main
+
+local inputCorner = Instance.new("UICorner")
+inputCorner.CornerRadius = UDim.new(0, 10)
+inputCorner.Parent = inputBox
+
+local inputPadding = Instance.new("UIPadding")
+inputPadding.PaddingLeft = UDim.new(0, 10)
+inputPadding.PaddingTop = UDim.new(0, 8)
+inputPadding.PaddingRight = UDim.new(0, 10)
+inputPadding.PaddingBottom = UDim.new(0, 8)
+inputPadding.Parent = inputBox
+
+-- Input label
+local inputLabel = Instance.new("TextLabel")
+inputLabel.Text = "INPUT (Obfuscated)"
+inputLabel.Size = UDim2.new(1, -30, 0, 20)
+inputLabel.Position = UDim2.new(0, 15, 0, 72)
+inputLabel.BackgroundTransparency = 1
+inputLabel.TextColor3 = Color3.fromRGB(100, 60, 255)
+inputLabel.TextSize = 11
+inputLabel.Font = Enum.Font.GothamBold
+inputLabel.TextXAlignment = Enum.TextXAlignment.Left
+inputLabel.Parent = main
+
+-- DEOBFUSCATE Button (big for mobile)
+local deobfBtn = Instance.new("TextButton")
+deobfBtn.Name = "DeobfBtn"
+deobfBtn.Text = "DEOBFUSCATE"
+deobfBtn.Size = UDim2.new(1, -30, 0, 55)
+deobfBtn.Position = UDim2.new(0, 15, 0, 0)
+deobfBtn.AnchorPoint = Vector2.new(0, 0.4)
+deobfBtn.BackgroundColor3 = accent
+deobfBtn.TextColor3 = Color3.new(1, 1, 1)
+deobfBtn.TextSize = 18
+deobfBtn.Font = Enum.Font.GothamBold
+deobfBtn.BorderSizePixel = 0
+deobfBtn.Parent = main
+
+local deobfBtnCorner = Instance.new("UICorner")
+deobfBtnCorner.CornerRadius = UDim.new(0, 12)
+deobfBtn.Parent = deobfBtn
+
+-- Position deobf button dynamically
+local function updateLayout()
+    local inputBottom = inputBox.Position.Y.Offset + inputBox.Size.Y.Offset
+    deobfBtn.Position = UDim2.new(0, 15, 0, inputBottom + 10)
+
+    local deobfBottom = deobfBtn.Position.Y.Offset + deobfBtn.Size.Y.Offset + 10
+
+    -- Output label
+    if outputLabel then
+        outputLabel.Position = UDim2.new(0, 15, 0, deobfBottom)
+    end
+
+    -- Output box
+    if outputBox then
+        outputBox.Position = UDim2.new(0, 15, 0, deobfBottom + 18)
+        local remaining = main.Size.Y.Offset - (deobfBottom + 18) - 60
+        outputBox.Size = UDim2.new(1, -30, 0, math.max(80, remaining))
+    end
+
+    -- Copy button
+    if copyBtn then
+        copyBtn.Position = UDim2.new(0, 15, 0, main.Size.Y.Offset - 52)
+    end
+end
+
+-- Output label
+local outputLabel = Instance.new("TextLabel")
+outputLabel.Text = "OUTPUT (Deobfuscated)"
+outputLabel.BackgroundColor3 = accent
+outputLabel.TextColor3 = Color3.new(1, 1, 1)
+outputLabel.TextSize = 11
+outputLabel.Font = Enum.Font.GothamBold
+outputLabel.BorderSizePixel = 0
+outputLabel.Parent = main
+
+local outputLabelCorner = Instance.new("UICorner")
+outputLabelCorner.CornerRadius = UDim.new(0, 6)
+outputLabelCorner.Parent = outputLabel
+
+-- Output TextBox
+local outputBox = Instance.new("TextBox")
+outputBox.Name = "OutputBox"
+outputBox.Text = ""
+outputBox.PlaceholderText = "Deobfuscated code will appear here..."
+outputBox.PlaceholderColor3 = dimText
+outputBox.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+outputBox.TextColor3 = successCol
+outputBox.TextSize = 12
+outputBox.Font = Enum.Font.Code
+outputBox.TextXAlignment = Enum.TextXAlignment.Left
+outputBox.TextYAlignment = Enum.TextYAlignment.Top
+outputBox.MultiLine = true
+outputBox.ClearTextOnFocus = false
+outputBox.BorderSizePixel = 0
+outputBox.Parent = main
+
+local outputCorner = Instance.new("UICorner")
+outputCorner.CornerRadius = UDim.new(0, 10)
+outputCorner.Parent = outputBox
+
+local outputPadding = Instance.new("UIPadding")
+outputPadding.PaddingLeft = UDim.new(0, 10)
+outputPadding.PaddingTop = UDim.new(0, 8)
+outputPadding.PaddingRight = UDim.new(0, 10)
+outputPadding.PaddingBottom = UDim.new(0, 8)
+outputPadding.Parent = outputBox
+
+-- Copy Button
+local copyBtn = Instance.new("TextButton")
+copyBtn.Name = "CopyBtn"
+copyBtn.Text = "COPY OUTPUT"
+copyBtn.Size = UDim2.new(0.48, 0, 0, 42)
+copyBtn.BackgroundColor3 = accent2
+copyBtn.TextColor3 = Color3.new(1, 1, 1)
+copyBtn.TextSize = 14
+copyBtn.Font = Enum.Font.GothamBold
+copyBtn.BorderSizePixel = 0
+copyBtn.Parent = main
+
+local copyCorner = Instance.new("UICorner")
+copyCorner.CornerRadius = UDim.new(0, 10)
+copyCorner.Parent = copyBtn
+
+-- Clear Button
+local clearBtn = Instance.new("TextButton")
+clearBtn.Text = "CLEAR ALL"
+clearBtn.Size = UDim2.new(0.48, 0, 0, 42)
+clearBtn.Position = UDim2.new(0.52, 0, 1, -52)
+clearBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+clearBtn.TextColor3 = Color3.new(1, 1, 1)
+clearBtn.TextSize = 14
+clearBtn.Font = Enum.Font.GothamBold
+clearBtn.BorderSizePixel = 0
+clearBtn.Parent = main
+
+local clearCorner = Instance.new("UICorner")
+clearCorner.CornerRadius = UDim.new(0, 10)
+clearCorner.Parent = clearBtn
+
+updateLayout()
+
+-- ============================================
+-- BUTTON HANDLERS
+-- ============================================
+
+-- Deobfuscate button
+deobfBtn.MouseButton1Click:Connect(function()
+    local inputText = inputBox.Text
+    status.Text = "Processing..."
+    status.TextColor3 = Color3.fromRGB(255, 200, 50)
+
+    task.wait(0.2) -- Small delay so UI updates
+
+    local result, success = Deobf:run(inputText)
+    if success then
+        outputBox.Text = result
+        status.Text = "Done! " .. Deobf.passes .. " passes completed. Tap COPY."
+        status.TextColor3 = successCol
+    else
+        outputBox.Text = result
+        status.Text = "Error - check output"
+        status.TextColor3 = errorCol
+    end
+end)
+
+-- Copy button
+copyBtn.MouseButton1Click:Connect(function()
+    if #outputBox.Text > 0 then
+        if setclipboard then
+            setclipboard(outputBox.Text)
+            status.Text = "Copied to clipboard!"
+            status.TextColor3 = successCol
+        else
+            -- Fallback: set to InputBox so user can manually copy
+            inputBox.Text = outputBox.Text
+            status.Text = "No clipboard access - code moved to input box. Long press to copy."
+            status.TextColor3 = Color3.fromRGB(255, 200, 50)
+        end
+    else
+        status.Text = "Nothing to copy! Run deobfuscator first."
+        status.TextColor3 = errorCol
+    end
+end)
+
+-- Clear button
+clearBtn.MouseButton1Click:Connect(function()
+    inputBox.Text = ""
+    outputBox.Text = ""
+    status.Text = "Cleared! Paste a new script."
+    status.TextColor3 = dimText
+end)
+
+-- Close button
+closeBtn.MouseButton1Click:Connect(function()
+    main.Visible = false
+    toggleBtn.Visible = true
+end)
+
+-- ============================================
+-- FLOATING TOGGLE BUTTON (big for mobile touch)
+-- ============================================
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleBtn"
+toggleBtn.Text = "D"
+toggleBtn.Size = UDim2.new(0, 56, 0, 56)
+toggleBtn.Position = UDim2.new(0, 10, 0.5, 0)
+toggleBtn.AnchorPoint = Vector2.new(0, 0.5)
+toggleBtn.BackgroundColor3 = accent
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.TextSize = 22
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = gui
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 28)
+toggleCorner.Parent = toggleBtn
+
+toggleBtn.MouseButton1Click:Connect(function()
+    main.Visible = true
+    toggleBtn.Visible = false
+end)
+
+-- Make toggle button draggable on mobile
+local dragging = false
+local dragStart, startPos
+
+toggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = toggleBtn.Position
+    end
+end)
+
+toggleBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+        local delta = input.Position - dragStart
+        toggleBtn.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Auto-show on first execute
+main.Visible = true
+toggleBtn.Visible = false
+
+print("========================================")
+print("  WeAreDevs Deobfuscator v2.0 - MOBILE")
+print("  By Catmio Agent")
+print("========================================")
+print("Mobile GUI loaded!")
+print("Tap the floating 'D' button to reopen.")
+print("========================================")
